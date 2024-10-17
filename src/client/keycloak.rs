@@ -99,7 +99,7 @@ impl KeycloakClient {
 
         println!(
             "Open this url {} \nand enter the code: {}",
-            device_auth_request.verification_uri().to_string(),
+            **device_auth_request.verification_uri(),
             device_auth_request.user_code().secret()
         );
         Ok(device_auth_request)
@@ -177,7 +177,7 @@ impl KeycloakClient {
                             PollDeviceCodeEvent::ExpiredToken => break,
                             PollDeviceCodeEvent::AccessDenied => break,
                             PollDeviceCodeEvent::SlowDown => {
-                                interval += 5 as u64;
+                                interval += 5_u64;
                                 continue;
                             }
                         }
