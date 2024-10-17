@@ -1,11 +1,13 @@
 [package]
 name = "keycloak-oauth"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["Mike Potapenco <buhaytza2005@gmail.com>"]
 description = "Library designed for seamless integration with Keycloak's OAuth2 authentication flows"
+repository = "https://github.com/buhaytza2005/keycloak-oauth"
 readme = "README.md"
 license = "MIT"
+keywords = ["keycloak", "oauth"]
 
 [lib]
 pkg = "./src/lib.rs"

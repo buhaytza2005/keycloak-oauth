@@ -13,6 +13,11 @@ pub struct KeyCache {
     last_updated: Instant,
     first: bool,
 }
+impl Default for KeyCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl KeyCache {
     pub fn new() -> Self {
@@ -85,6 +90,6 @@ pub async fn fetch_and_cache_jwks(
         }
         Ok(cache_guard.keys.clone())
     } else {
-        return Ok(cache_guard.keys.clone());
+        Ok(cache_guard.keys.clone())
     }
 }

@@ -1,5 +1,4 @@
 use jsonwebtoken::TokenData;
-#[allow(dead_code)]
 use oauth2::{
     basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
     EmptyExtraDeviceAuthorizationFields, RequestTokenError, Scope, StandardErrorResponse,
@@ -16,6 +15,8 @@ use oauth2::{
     AuthUrl, ClientId, ClientSecret, DeviceAuthorizationUrl, EmptyExtraTokenFields, RefreshToken,
     TokenUrl,
 };
+
+use crate::client::PollDeviceCodeEvent;
 
 use super::{
     config::ClientConfiguration,
@@ -48,6 +49,7 @@ pub enum ClientError {
 }
 
 type MyStandardTokenResponse = oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
+
 pub struct KeycloakClient {
     pub inner: BasicClient,
     pub config: ClientConfiguration,
@@ -97,7 +99,7 @@ impl KeycloakClient {
 
         println!(
             "Open this url {} \nand enter the code: {}",
-            device_auth_request.verification_uri().to_string(),
+            **device_auth_request.verification_uri(),
             device_auth_request.user_code().secret()
         );
         Ok(device_auth_request)
@@ -145,26 +147,43 @@ impl KeycloakClient {
         let max_attempts = (device_auth_response.expires_in().as_secs()
             / device_auth_response.interval().as_secs()) as usize;
 
+        let mut interval = device_auth_response.interval().as_secs();
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(
-                device_auth_response.interval().as_secs(),
-            ))
-            .await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(interval)).await;
             attempts += 1;
 
             match self
                 .inner
                 .exchange_device_access_token(device_auth_response)
-                .request_async(async_http_client, tokio::time::sleep, None)
+                .request_async(
+                    async_http_client,
+                    tokio::time::sleep,
+                    Some(tokio::time::Duration::from_secs(10)),
+                )
                 .await
             {
                 Ok(token) => {
                     self.cache_token(&token)?;
                     return Ok(token);
                 }
-                Err(err) => {
-                    println!("{:>12}", err);
-                }
+                Err(err) => match err {
+                    RequestTokenError::ServerResponse(e) => {
+                        let poll_event = PollDeviceCodeEvent::from(e);
+                        poll_event.as_message();
+                        match poll_event {
+                            PollDeviceCodeEvent::AuthorizationPending => continue,
+                            PollDeviceCodeEvent::AuthorizationDeclined => break,
+                            PollDeviceCodeEvent::BadVerificationCode => continue,
+                            PollDeviceCodeEvent::ExpiredToken => break,
+                            PollDeviceCodeEvent::AccessDenied => break,
+                            PollDeviceCodeEvent::SlowDown => {
+                                interval += 5_u64;
+                                continue;
+                            }
+                        }
+                    }
+                    _ => PollDeviceCodeEvent::AccessDenied.as_message(),
+                },
             }
             if attempts >= max_attempts {
                 eprintln!("Maximum polling attempts reached. Exiting.");
