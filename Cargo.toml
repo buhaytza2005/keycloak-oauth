@@ -1,0 +1,25 @@
+[package]
+name = "keycloak-oauth"
+version = "0.0.1"
+edition = "2021"
+authors = ["Mike Potapenco <buhaytza2005@gmail.com>"]
+description = "Library designed for seamless integration with Keycloak's OAuth2 authentication flows"
+readme = "README.md"
+license = "MIT"
+
+[lib]
+pkg = "./src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.89"
+chrono = { version = "0.4.38", features = ["serde"] }
+dotenv = "0.15.0"
+jsonwebtoken = "9.3.0"
+oauth2 = "4.4.2"
+reqwest = { version = "0.12.8", features = ["json"] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+serde_with = "3.11.0"
+thiserror = "1.0.64"
+time = "0.3.36"
+tokio = { version = "1.40.0", features = ["full"] }
