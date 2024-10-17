@@ -1,5 +1,4 @@
 use jsonwebtoken::TokenData;
-#[allow(dead_code)]
 use oauth2::{
     basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
     EmptyExtraDeviceAuthorizationFields, RequestTokenError, Scope, StandardErrorResponse,
@@ -48,6 +47,7 @@ pub enum ClientError {
 }
 
 type MyStandardTokenResponse = oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
+
 pub struct KeycloakClient {
     pub inner: BasicClient,
     pub config: ClientConfiguration,
