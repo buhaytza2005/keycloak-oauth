@@ -1,8 +1,8 @@
 use jsonwebtoken::TokenData;
 use oauth2::{
     basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
-    EmptyExtraDeviceAuthorizationFields, PasswordTokenRequest, RequestTokenError,
-    ResourceOwnerPassword, ResourceOwnerUsername, Scope, StandardErrorResponse, TokenResponse,
+    EmptyExtraDeviceAuthorizationFields, RequestTokenError, ResourceOwnerPassword,
+    ResourceOwnerUsername, Scope, StandardErrorResponse, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -131,7 +131,7 @@ impl KeycloakClient {
             .await
             .expect("password grant");
 
-        println!("{:#?}", owner_credentials);
+        todo!()
         // Define the Keycloak token endpoint
 
         Ok(())
