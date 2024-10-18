@@ -1,8 +1,8 @@
 use jsonwebtoken::TokenData;
 use oauth2::{
     basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
-    EmptyExtraDeviceAuthorizationFields, RequestTokenError, Scope, StandardErrorResponse,
-    TokenResponse,
+    EmptyExtraDeviceAuthorizationFields, PasswordTokenRequest, RequestTokenError,
+    ResourceOwnerPassword, ResourceOwnerUsername, Scope, StandardErrorResponse, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -46,6 +46,9 @@ pub enum ClientError {
 
     #[error("No valid token available. Please authenticate.")]
     NoValidTokenError,
+
+    #[error("Missing credentials for password grant. Check the KK_USER and KK_PASSWORD in your .env file")]
+    NoPresentCredentials,
 }
 
 type MyStandardTokenResponse = oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
@@ -103,6 +106,35 @@ impl KeycloakClient {
             device_auth_request.user_code().secret()
         );
         Ok(device_auth_request)
+    }
+
+    pub async fn initiate_password_flow(&self) -> Result<(), ClientError> {
+        if self.config.username.is_none() || self.config.password.is_none() {
+            return Err(ClientError::NoPresentCredentials);
+        };
+
+        let username =
+            ResourceOwnerUsername::new(self.config.username.clone().expect("Should have username"));
+        let password =
+            ResourceOwnerPassword::new(self.config.password.clone().expect("Should have password"));
+        let scopes = self
+            .config
+            .scopes
+            .iter()
+            .map(|s| Scope::new(s.clone()))
+            .collect::<Vec<_>>();
+        let owner_credentials = self
+            .inner
+            .exchange_password(&username, &password)
+            .add_scopes(scopes)
+            .request_async(async_http_client)
+            .await
+            .expect("password grant");
+
+        println!("{:#?}", owner_credentials);
+        // Define the Keycloak token endpoint
+
+        Ok(())
     }
 
     pub fn cache_token(
