@@ -1,4 +1,4 @@
-use keycloak_oauth::client::{ClientConfiguration, ClientError, KeycloakClient};
+use keycloak_oauth::client::{ClientConfiguration, ClientError, Flow, KeycloakClient};
 use oauth2::TokenResponse;
 
 #[tokio::main]
@@ -9,7 +9,7 @@ async fn main() -> Result<(), ClientError> {
     let token = match keycloak_client.verify_and_refresh_access_token().await {
         Ok(token) => token,
         Err(_) => keycloak_client
-            .authenticate()
+            .authenticate(Flow::DeviceAuthorization)
             .await?
             .access_token()
             .secret()

@@ -2,7 +2,7 @@ use jsonwebtoken::TokenData;
 use oauth2::{
     basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
     EmptyExtraDeviceAuthorizationFields, RequestTokenError, ResourceOwnerPassword,
-    ResourceOwnerUsername, Scope, StandardErrorResponse, TokenResponse,
+    ResourceOwnerUsername, Scope, StandardErrorResponse, StandardTokenResponse, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -48,7 +48,7 @@ pub enum ClientError {
     NoValidTokenError,
 
     #[error("Missing credentials for password grant. Check the KK_USER and KK_PASSWORD in your .env file")]
-    NoPresentCredentials,
+    NoPresentCredentialsError,
 }
 
 type MyStandardTokenResponse = oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
@@ -108,9 +108,11 @@ impl KeycloakClient {
         Ok(device_auth_request)
     }
 
-    pub async fn initiate_password_flow(&self) -> Result<(), ClientError> {
+    pub async fn initiate_password_flow(
+        &self,
+    ) -> Result<StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>, ClientError> {
         if self.config.username.is_none() || self.config.password.is_none() {
-            return Err(ClientError::NoPresentCredentials);
+            return Err(ClientError::NoPresentCredentialsError);
         };
 
         let username =
@@ -131,10 +133,9 @@ impl KeycloakClient {
             .await
             .expect("password grant");
 
-        todo!()
-        // Define the Keycloak token endpoint
+        self.cache_token(&owner_credentials)?;
 
-        Ok(())
+        Ok(owner_credentials)
     }
 
     pub fn cache_token(
@@ -228,11 +229,19 @@ impl KeycloakClient {
         ))
     }
 
-    pub async fn authenticate(&self) -> Result<MyStandardTokenResponse, ClientError> {
-        let device_auth_response = self.initiate_device_flow().await?;
+    pub async fn authenticate(&self, flow: Flow) -> Result<MyStandardTokenResponse, ClientError> {
+        match flow {
+            Flow::DeviceAuthorization => {
+                let device_auth_response = self.initiate_device_flow().await?;
 
-        let token = self.poll_for_token(&device_auth_response).await?;
-        Ok(token)
+                let token = self.poll_for_token(&device_auth_response).await?;
+                Ok(token)
+            }
+            Flow::OwnerCredentials => {
+                let token = self.initiate_password_flow().await?;
+                Ok(token)
+            }
+        }
     }
 
     /// Verifies the passed access token
@@ -291,4 +300,9 @@ pub struct CachedToken {
     #[serde_as(as = "DisplayFromStr")]
     pub expires_at: chrono::DateTime<chrono::Utc>,
     pub refresh_token: Option<String>,
+}
+
+pub enum Flow {
+    DeviceAuthorization,
+    OwnerCredentials,
 }
