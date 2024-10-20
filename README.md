@@ -9,6 +9,12 @@ Currently only supports device authentication flow.
 ## Getting started
 
 ```rust
+async fn main() -> Result<(), ClientError> {
+
+}
+```
+
+```rust
 use keycloak_oauth::{ClientConfiguration, KeycloakClient, ClientError};
 
 #[tokio::main]
