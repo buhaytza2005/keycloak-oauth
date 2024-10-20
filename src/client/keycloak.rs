@@ -1,9 +1,9 @@
 use jsonwebtoken::TokenData;
 use oauth2::{
-    basic::BasicErrorResponseType, reqwest::async_http_client, AuthType, Client,
-    DeviceAuthorizationResponse, EmptyExtraDeviceAuthorizationFields, RequestTokenError,
-    ResourceOwnerPassword, ResourceOwnerUsername, Scope, StandardErrorResponse,
-    StandardTokenResponse, TokenResponse,
+    basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
+    EmptyExtraDeviceAuthorizationFields, RequestTokenError, ResourceOwnerPassword,
+    ResourceOwnerUsername, Scope, StandardErrorResponse, StandardTokenResponse, TokenResponse,
+    TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -13,8 +13,7 @@ use tokio::sync::Mutex;
 
 use oauth2::{
     basic::{BasicClient, BasicTokenType},
-    AuthUrl, ClientId, ClientSecret, DeviceAuthorizationUrl, EmptyExtraTokenFields, RefreshToken,
-    TokenUrl,
+    AuthUrl, ClientId, DeviceAuthorizationUrl, EmptyExtraTokenFields, RefreshToken,
 };
 
 use crate::client::PollDeviceCodeEvent;
@@ -22,8 +21,8 @@ use crate::client::PollDeviceCodeEvent;
 use super::{
     config::ClientConfiguration,
     jwks::{KeyCache, SharedKeyCache},
-    verify_jwt, AppConfig, Claims, Credential, DeviceCodeCredential, PublicApplication,
-    ResourceOwnerPasswordCredential, VerifyJwtError, WithDeviceCredentials, WithOwnerCredentials,
+    verify_jwt, AppConfig, Claims, ResourceOwnerPasswordCredential, VerifyJwtError,
+    WithDeviceCredentials, WithOwnerCredentials,
 };
 
 #[derive(Error, Debug)]
@@ -39,7 +38,6 @@ pub enum ClientError {
             StandardErrorResponse<BasicErrorResponseType>,
         >,
     ),
-
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
@@ -63,14 +61,24 @@ pub struct KeycloakClient<C> {
 }
 impl From<AppConfig<ResourceOwnerPasswordCredential>> for KeycloakClient<WithOwnerCredentials> {
     fn from(value: AppConfig<ResourceOwnerPasswordCredential>) -> Self {
+        let config = ClientConfiguration::from_env();
+
+        let token_url = if value.token_url.is_some() {
+            value.token_url.clone().expect("token")
+        } else {
+            config
+                .token_url
+                .clone()
+                .expect("No token_url in the config. Add token_url")
+        };
+
         let inner = BasicClient::new(
             ClientId::new(value.client_id.clone()),
             None,
             AuthUrl::new(value.auth_url.clone()).expect("Invalid auth endpoint"),
-            None,
+            Some(TokenUrl::new(token_url).expect("Invalid token")),
         );
         let cache = Arc::new(Mutex::new(KeyCache::new()));
-        let config = ClientConfiguration::from_env().expect("should have .env file");
 
         KeycloakClient {
             inner,
@@ -117,88 +125,6 @@ impl KeycloakClient<WithDeviceCredentials> {
         );
         Ok(device_auth_request)
     }
-
-    pub async fn initiate_password_flow(
-        &self,
-    ) -> Result<StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>, ClientError> {
-        if self.config.username.is_none() || self.config.password.is_none() {
-            return Err(ClientError::NoPresentCredentialsError);
-        };
-
-        let username =
-            ResourceOwnerUsername::new(self.config.username.clone().expect("Should have username"));
-        let password =
-            ResourceOwnerPassword::new(self.config.password.clone().expect("Should have password"));
-        let scopes = self
-            .config
-            .scopes
-            .iter()
-            .map(|s| Scope::new(s.clone()))
-            .collect::<Vec<_>>();
-        let owner_credentials = self
-            .inner
-            .exchange_password(&username, &password)
-            .add_scopes(scopes)
-            .request_async(async_http_client)
-            .await
-            .expect("password grant");
-
-        self.cache_token(&owner_credentials)?;
-
-        Ok(owner_credentials)
-    }
-
-    pub fn cache_token(
-        &self,
-        token: &oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
-    ) -> Result<(), ClientError> {
-        let expires_in = token
-            .expires_in()
-            .unwrap_or_else(|| std::time::Duration::from_secs(3600));
-        let expires_at = chrono::Utc::now() + expires_in;
-
-        let cached_token = CachedToken {
-            access_token: token.access_token().secret().to_string(),
-            expires_at,
-            refresh_token: token.refresh_token().map(|rt| rt.secret().clone()),
-        };
-
-        let serialized = serde_json::to_string_pretty(&cached_token)?;
-        std::fs::write(
-            &self
-                .config
-                .token_cache_path
-                .clone()
-                .expect("Could not find the cache path in .env"),
-            serialized,
-        )?;
-        Ok(())
-    }
-    pub fn load_cached_token(&self) -> Result<CachedToken, ClientError> {
-        if !Path::exists(Path::new(
-            &self
-                .config
-                .token_cache_path
-                .clone()
-                .expect("Could not find the cache path in .env"),
-        )) {
-            return Err(ClientError::IoError(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "token cache not found",
-            )));
-        }
-
-        let data = fs::read_to_string(Path::new(
-            &self
-                .config
-                .token_cache_path
-                .clone()
-                .expect("Could not find the cache path in .env"),
-        ))?;
-        let cached_token: CachedToken = serde_json::from_str(&data)?;
-        Ok(cached_token)
-    }
-
     pub async fn poll_for_token(
         &self,
         device_auth_response: &oauth2::DeviceAuthorizationResponse<
@@ -257,20 +183,101 @@ impl KeycloakClient<WithDeviceCredentials> {
             oauth2::RequestTokenError::Other("Polling timeout".into()),
         ))
     }
+    pub async fn authenticate(&self) -> Result<MyStandardTokenResponse, ClientError> {
+        let device_auth_response = self.initiate_device_flow().await?;
 
-    pub async fn authenticate(&self, flow: Flow) -> Result<MyStandardTokenResponse, ClientError> {
-        match flow {
-            Flow::DeviceAuthorization => {
-                let device_auth_response = self.initiate_device_flow().await?;
+        let token = self.poll_for_token(&device_auth_response).await?;
+        Ok(token)
+    }
+}
 
-                let token = self.poll_for_token(&device_auth_response).await?;
-                Ok(token)
-            }
-            Flow::OwnerCredentials => {
-                let token = self.initiate_password_flow().await?;
-                Ok(token)
-            }
+impl KeycloakClient<WithOwnerCredentials> {
+    pub async fn initiate_password_flow(
+        &self,
+    ) -> Result<StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>, ClientError> {
+        if self.config.username.is_none() || self.config.password.is_none() {
+            return Err(ClientError::NoPresentCredentialsError);
+        };
+
+        let username =
+            ResourceOwnerUsername::new(self.config.username.clone().expect("Should have username"));
+        let password =
+            ResourceOwnerPassword::new(self.config.password.clone().expect("Should have password"));
+        let scopes = self
+            .config
+            .scopes
+            .iter()
+            .map(|s| Scope::new(s.clone()))
+            .collect::<Vec<_>>();
+        let owner_credentials = self
+            .inner
+            .exchange_password(&username, &password)
+            .add_scopes(scopes)
+            .request_async(async_http_client)
+            .await
+            .expect("password grant");
+
+        self.cache_token(&owner_credentials)?;
+
+        Ok(owner_credentials)
+    }
+    pub async fn authenticate(&self) -> Result<MyStandardTokenResponse, ClientError> {
+        let token = self.initiate_password_flow().await?;
+
+        Ok(token)
+    }
+}
+
+impl<C> KeycloakClient<C> {
+    pub fn cache_token(
+        &self,
+        token: &oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
+    ) -> Result<(), ClientError> {
+        let expires_in = token
+            .expires_in()
+            .unwrap_or_else(|| std::time::Duration::from_secs(3600));
+        let expires_at = chrono::Utc::now() + expires_in;
+
+        let cached_token = CachedToken {
+            access_token: token.access_token().secret().to_string(),
+            expires_at,
+            refresh_token: token.refresh_token().map(|rt| rt.secret().clone()),
+        };
+
+        let serialized = serde_json::to_string_pretty(&cached_token)?;
+        std::fs::write(
+            &self
+                .config
+                .token_cache_path
+                .clone()
+                .expect("Could not find the cache path in .env"),
+            serialized,
+        )?;
+        Ok(())
+    }
+    pub fn load_cached_token(&self) -> Result<CachedToken, ClientError> {
+        if !Path::exists(Path::new(
+            &self
+                .config
+                .token_cache_path
+                .clone()
+                .expect("Could not find the cache path in .env"),
+        )) {
+            return Err(ClientError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "token cache not found",
+            )));
         }
+
+        let data = fs::read_to_string(Path::new(
+            &self
+                .config
+                .token_cache_path
+                .clone()
+                .expect("Could not find the cache path in .env"),
+        ))?;
+        let cached_token: CachedToken = serde_json::from_str(&data)?;
+        Ok(cached_token)
     }
 
     /// Verifies the passed access token
@@ -307,12 +314,15 @@ impl KeycloakClient<WithDeviceCredentials> {
                 if cached_token.expires_at <= chrono::Utc::now() {
                     //token is expired
                     if let Some(refresh_token_str) = cached_token.refresh_token {
-                        let new_token = self
+                        let new_token = match self
                             .inner
                             .exchange_refresh_token(&RefreshToken::new(refresh_token_str))
                             .request_async(async_http_client)
                             .await
-                            .expect("Should have a new token");
+                        {
+                            Ok(token) => token,
+                            Err(_e) => return Err(ClientError::NoValidTokenError),
+                        };
                         self.cache_token(&new_token)?;
                         Ok(new_token.access_token().secret().clone())
                     } else {
