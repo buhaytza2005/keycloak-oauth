@@ -1,17 +1,17 @@
 use keycloak_oauth::client::{
-    AppConfigBuilder, EnvironmentCredential, KeycloakClient, PublicApplicationBuilder,
+    AppConfigBuilder, EnvironmentCredential, KeycloakClient, WithOwnerCredentials,
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let owner_creds = EnvironmentCredential::resource_owner_password_credential()?;
     let app_config = AppConfigBuilder::new("waves-ui")
-        .token_url("")
         .auth_url("")
         .with_owner_credentials(owner_creds)
-        .build();
+        .build()
+        .expect("app config");
 
-    let client = KeycloakClient::from(app_config);
+    let client = KeycloakClient::<WithOwnerCredentials>::from(app_config);
 
     Ok(())
 }

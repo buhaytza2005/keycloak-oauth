@@ -23,7 +23,7 @@ use super::{
     config::ClientConfiguration,
     jwks::{KeyCache, SharedKeyCache},
     verify_jwt, AppConfig, Claims, Credential, DeviceCodeCredential, PublicApplication,
-    ResourceOwnerPasswordCredential, VerifyJwtError,
+    ResourceOwnerPasswordCredential, VerifyJwtError, WithDeviceCredentials, WithOwnerCredentials,
 };
 
 #[derive(Error, Debug)]
@@ -61,9 +61,7 @@ pub struct KeycloakClient<C> {
     pub cache: SharedKeyCache,
     pub _marker: PhantomData<C>,
 }
-impl From<AppConfig<ResourceOwnerPasswordCredential>>
-    for KeycloakClient<ResourceOwnerPasswordCredential>
-{
+impl From<AppConfig<ResourceOwnerPasswordCredential>> for KeycloakClient<WithOwnerCredentials> {
     fn from(value: AppConfig<ResourceOwnerPasswordCredential>) -> Self {
         let inner = BasicClient::new(
             ClientId::new(value.client_id.clone()),
@@ -72,38 +70,17 @@ impl From<AppConfig<ResourceOwnerPasswordCredential>>
             None,
         );
         let cache = Arc::new(Mutex::new(KeyCache::new()));
+        let config = ClientConfiguration::from_env().expect("should have .env file");
 
         KeycloakClient {
             inner,
             cache,
-            config: ClientConfiguration::from_env(),
+            config,
             _marker: PhantomData,
         }
     }
 }
-impl<C: Credential> KeycloakClient<C> {
-    pub fn new(config: ClientConfiguration) -> Self {
-        let client = BasicClient::new(
-            ClientId::new(config.client_id.clone()),
-            Some(ClientSecret::new(config.client_secret.clone())),
-            AuthUrl::new(config.auth_url.clone()).expect("Invalid auth endpoint"),
-            Some(TokenUrl::new(config.token_url.clone()).expect("invalid token endpoint")),
-        )
-        .set_device_authorization_url(
-            DeviceAuthorizationUrl::new(config.device_authorization_url.clone())
-                .expect("Invalid dev endpoint"),
-        );
-
-        let shared_cache = Arc::new(Mutex::new(KeyCache::new()));
-
-        KeycloakClient {
-            inner: client,
-            config,
-            cache: shared_cache,
-            _marker: PhantomData,
-        }
-    }
-
+impl KeycloakClient<WithDeviceCredentials> {
     pub async fn initiate_device_flow(
         &self,
     ) -> Result<DeviceAuthorizationResponse<EmptyExtraDeviceAuthorizationFields>, ClientError> {
@@ -116,6 +93,16 @@ impl<C: Credential> KeycloakClient<C> {
 
         let device_auth_request = self
             .inner
+            .clone()
+            .set_device_authorization_url(
+                DeviceAuthorizationUrl::new(
+                    self.config
+                        .device_authorization_url
+                        .clone()
+                        .expect("Device authorization url cannot be found. Check .env!"),
+                )
+                .expect("Invalid dev endpoint"),
+            )
             .exchange_device_code()
             .expect("works?")
             .add_scopes(scopes)
@@ -177,18 +164,37 @@ impl<C: Credential> KeycloakClient<C> {
         };
 
         let serialized = serde_json::to_string_pretty(&cached_token)?;
-        std::fs::write(&self.config.token_cache_path, serialized)?;
+        std::fs::write(
+            &self
+                .config
+                .token_cache_path
+                .clone()
+                .expect("Could not find the cache path in .env"),
+            serialized,
+        )?;
         Ok(())
     }
     pub fn load_cached_token(&self) -> Result<CachedToken, ClientError> {
-        if !Path::exists(Path::new(&self.config.token_cache_path)) {
+        if !Path::exists(Path::new(
+            &self
+                .config
+                .token_cache_path
+                .clone()
+                .expect("Could not find the cache path in .env"),
+        )) {
             return Err(ClientError::IoError(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "token cache not found",
             )));
         }
 
-        let data = fs::read_to_string(Path::new(&self.config.token_cache_path))?;
+        let data = fs::read_to_string(Path::new(
+            &self
+                .config
+                .token_cache_path
+                .clone()
+                .expect("Could not find the cache path in .env"),
+        ))?;
         let cached_token: CachedToken = serde_json::from_str(&data)?;
         Ok(cached_token)
     }
@@ -269,12 +275,27 @@ impl<C: Credential> KeycloakClient<C> {
 
     /// Verifies the passed access token
     pub async fn verify_access_token(&self, token: &str) -> Result<TokenData<Claims>, ClientError> {
+        let jwks_url = self
+            .config
+            .jwks_url
+            .clone()
+            .expect("Could not find jwks url, check .env");
+        let client_id = self
+            .config
+            .client_id
+            .clone()
+            .expect("Cannot find client_id, token verification failed. Check .env");
+        let realm = self
+            .config
+            .realm
+            .clone()
+            .expect("Cannot find realm, token verification failed. Check .env");
         verify_jwt(
             token,
-            &self.config.jwks_url,
+            &jwks_url,
             self.cache.clone(),
-            &[&self.config.client_id],
-            &[&self.config.realm],
+            &[&client_id],
+            &[&realm],
         )
         .await
         .map_err(ClientError::JwtVerificationError)
