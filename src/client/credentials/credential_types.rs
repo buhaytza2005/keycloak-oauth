@@ -27,8 +27,6 @@ impl ResourceOwnerPasswordCredential {
 #[derive(Debug, Clone)]
 pub struct DeviceCodeCredential {
     pub client_id: String,
-    pub device_code: String,
-    pub token_url: String,
 }
 
 impl Credential for DeviceCodeCredential {}

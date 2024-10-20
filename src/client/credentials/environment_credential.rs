@@ -5,7 +5,7 @@ use std::{
 
 use dotenv::dotenv;
 
-use super::credential_types::ResourceOwnerPasswordCredential;
+use super::{credential_types::ResourceOwnerPasswordCredential, DeviceCodeCredential};
 #[derive(Clone)]
 pub struct EnvironmentCredential;
 
@@ -19,6 +19,9 @@ impl EnvironmentCredential {
     pub fn resource_owner_password_credential() -> Result<ResourceOwnerPasswordCredential, VarError>
     {
         EnvironmentCredential::try_username_password_env()
+    }
+    pub fn device_credential() -> Result<DeviceCodeCredential, VarError> {
+        EnvironmentCredential::try_device_env()
     }
 
     fn try_username_password_env() -> Result<ResourceOwnerPasswordCredential, VarError> {
@@ -34,5 +37,12 @@ impl EnvironmentCredential {
         };
 
         Ok(creds)
+    }
+    fn try_device_env() -> Result<DeviceCodeCredential, VarError> {
+        dotenv().ok();
+        println!("clientid");
+        let client_id = std::env::var("KK_CLIENT_ID")?;
+
+        Ok(DeviceCodeCredential { client_id })
     }
 }

@@ -1,9 +1,9 @@
 use jsonwebtoken::TokenData;
 use oauth2::{
-    basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
-    EmptyExtraDeviceAuthorizationFields, RequestTokenError, ResourceOwnerPassword,
-    ResourceOwnerUsername, Scope, StandardErrorResponse, StandardTokenResponse, TokenResponse,
-    TokenUrl,
+    basic::BasicErrorResponseType, reqwest::async_http_client, ClientSecret,
+    DeviceAuthorizationResponse, EmptyExtraDeviceAuthorizationFields, RequestTokenError,
+    ResourceOwnerPassword, ResourceOwnerUsername, Scope, StandardErrorResponse,
+    StandardTokenResponse, TokenResponse, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -21,8 +21,8 @@ use crate::client::PollDeviceCodeEvent;
 use super::{
     config::ClientConfiguration,
     jwks::{KeyCache, SharedKeyCache},
-    verify_jwt, AppConfig, Claims, ResourceOwnerPasswordCredential, VerifyJwtError,
-    WithDeviceCredentials, WithOwnerCredentials,
+    verify_jwt, AppConfig, Claims, DeviceCodeCredential, ResourceOwnerPasswordCredential,
+    VerifyJwtError, WithDeviceCredentials, WithOwnerCredentials,
 };
 
 #[derive(Error, Debug)]
@@ -58,6 +58,40 @@ pub struct KeycloakClient<C> {
     pub config: ClientConfiguration,
     pub cache: SharedKeyCache,
     pub _marker: PhantomData<C>,
+}
+impl From<AppConfig<DeviceCodeCredential>> for KeycloakClient<WithDeviceCredentials> {
+    fn from(value: AppConfig<DeviceCodeCredential>) -> Self {
+        let config = ClientConfiguration::from_env();
+
+        let token_url = if value.token_url.is_some() {
+            value.token_url.clone().expect("token")
+        } else {
+            config
+                .token_url
+                .clone()
+                .expect("No token_url in the config. Add token_url")
+        };
+
+        let inner = BasicClient::new(
+            ClientId::new(value.client_id.clone()),
+            Some(ClientSecret::new(
+                config
+                    .client_secret
+                    .clone()
+                    .expect("should have client secret"),
+            )),
+            AuthUrl::new(value.auth_url.clone()).expect("Invalid auth endpoint"),
+            Some(TokenUrl::new(token_url).expect("Invalid token")),
+        );
+        let cache = Arc::new(Mutex::new(KeyCache::new()));
+
+        KeycloakClient {
+            inner,
+            cache,
+            config,
+            _marker: PhantomData,
+        }
+    }
 }
 impl From<AppConfig<ResourceOwnerPasswordCredential>> for KeycloakClient<WithOwnerCredentials> {
     fn from(value: AppConfig<ResourceOwnerPasswordCredential>) -> Self {
