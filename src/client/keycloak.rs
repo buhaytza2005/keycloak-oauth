@@ -1,12 +1,13 @@
 use jsonwebtoken::TokenData;
 use oauth2::{
-    basic::BasicErrorResponseType, reqwest::async_http_client, DeviceAuthorizationResponse,
-    EmptyExtraDeviceAuthorizationFields, RequestTokenError, ResourceOwnerPassword,
-    ResourceOwnerUsername, Scope, StandardErrorResponse, StandardTokenResponse, TokenResponse,
+    basic::BasicErrorResponseType, reqwest::async_http_client, AuthType, Client,
+    DeviceAuthorizationResponse, EmptyExtraDeviceAuthorizationFields, RequestTokenError,
+    ResourceOwnerPassword, ResourceOwnerUsername, Scope, StandardErrorResponse,
+    StandardTokenResponse, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
-use std::{fs, path::Path, sync::Arc};
+use std::{fs, marker::PhantomData, path::Path, sync::Arc};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -21,7 +22,8 @@ use crate::client::PollDeviceCodeEvent;
 use super::{
     config::ClientConfiguration,
     jwks::{KeyCache, SharedKeyCache},
-    verify_jwt, Claims, VerifyJwtError,
+    verify_jwt, AppConfig, Claims, Credential, DeviceCodeCredential, PublicApplication,
+    ResourceOwnerPasswordCredential, VerifyJwtError,
 };
 
 #[derive(Error, Debug)]
@@ -53,13 +55,33 @@ pub enum ClientError {
 
 type MyStandardTokenResponse = oauth2::StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
 
-pub struct KeycloakClient {
+pub struct KeycloakClient<C> {
     pub inner: BasicClient,
     pub config: ClientConfiguration,
     pub cache: SharedKeyCache,
+    pub _marker: PhantomData<C>,
 }
+impl From<AppConfig<ResourceOwnerPasswordCredential>>
+    for KeycloakClient<ResourceOwnerPasswordCredential>
+{
+    fn from(value: AppConfig<ResourceOwnerPasswordCredential>) -> Self {
+        let inner = BasicClient::new(
+            ClientId::new(value.client_id.clone()),
+            None,
+            AuthUrl::new(value.auth_url.clone()).expect("Invalid auth endpoint"),
+            None,
+        );
+        let cache = Arc::new(Mutex::new(KeyCache::new()));
 
-impl KeycloakClient {
+        KeycloakClient {
+            inner,
+            cache,
+            config: ClientConfiguration::from_env(),
+            _marker: PhantomData,
+        }
+    }
+}
+impl<C: Credential> KeycloakClient<C> {
     pub fn new(config: ClientConfiguration) -> Self {
         let client = BasicClient::new(
             ClientId::new(config.client_id.clone()),
@@ -78,6 +100,7 @@ impl KeycloakClient {
             inner: client,
             config,
             cache: shared_cache,
+            _marker: PhantomData,
         }
     }
 
@@ -292,7 +315,6 @@ impl KeycloakClient {
         }
     }
 }
-
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CachedToken {
