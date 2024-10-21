@@ -1,42 +1,84 @@
-use super::KeycloakClient;
+use std::collections::HashMap;
 
+use dotenv::dotenv;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
 pub struct ClientConfiguration {
-    pub client_id: String,
-    pub client_secret: String,
-    pub auth_url: String,
-    pub token_url: String,
-    pub device_authorization_url: String,
-    pub token_cache_path: String,
-    pub jwks_url: String,
-    pub realm: String,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub auth_url: Option<String>,
+    pub token_url: Option<String>,
+    pub device_authorization_url: Option<String>,
+    pub token_cache_path: Option<String>,
+    pub jwks_url: Option<String>,
+    pub realm: Option<String>,
     pub scopes: Vec<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 impl ClientConfiguration {
-    pub fn build(self) -> KeycloakClient {
-        KeycloakClient::new(self)
-    }
-
     pub fn from_env() -> Self {
-        dotenv::dotenv().ok();
-        Self {
-            client_id: std::env::var("KK_CLIENT_ID").expect("Missing KK_CLIENT_ID"),
-            client_secret: std::env::var("KK_CLIENT_SECRET").expect("Missing KK_CLIENT_SECRET"),
-            auth_url: std::env::var("KK_AUTH_URL").expect("Missing KK_AUTH_URL"),
-            token_url: std::env::var("KK_TOKEN_URL").expect("Missing KK_TOKEN_URL"),
-            device_authorization_url: std::env::var("KK_DEVICE_AUTHORIZATION_URL")
-                .expect("Missing KK_DEVICE_AUTHORIZATION_URL"),
-            jwks_url: std::env::var("KK_JWKS_URL").expect("Missing KK_JWKS_URL"),
-            token_cache_path: std::env::var("KK_TOKEN_CACHE_PATH")
-                .expect("Missing KK_TOKEN_CACHE_PATH"),
-            realm: std::env::var("KK_REALM").expect("Missing realm"),
-            scopes: vec![
-                "openid".to_string(),
-                "email".to_string(),
-                "offline_access".to_string(),
-                "profile".to_string(),
-                "roles".to_string(),
-            ],
+        let names = vec![
+            "client_id",
+            "client_secret",
+            "auth_url",
+            "token_url",
+            "device_authorization_url",
+            "token_cache_path",
+            "jwks_url",
+            "realm",
+            "username",
+            "password",
+            "scopes",
+        ];
+        let mut vars = HashMap::new();
+        for v in &names {
+            vars.insert(*v, format!("KK_{}", v.to_uppercase()));
+        }
+
+        dotenv().ok();
+        let client_id: Option<String> = std::env::var(vars.get("client_id").expect("work")).ok();
+        let client_secret: Option<String> =
+            std::env::var(vars.get("client_secret").expect("work")).ok();
+        let auth_url: Option<String> = std::env::var(vars.get("auth_url").expect("work")).ok();
+        let token_url: Option<String> = std::env::var(vars.get("token_url").expect("work")).ok();
+        let device_authorization_url: Option<String> =
+            std::env::var(vars.get("device_authorization_url").expect("work")).ok();
+        let token_cache_path: Option<String> =
+            std::env::var(vars.get("token_cache_path").expect("work")).ok();
+        let jwks_url: Option<String> = std::env::var(vars.get("jwks_url").expect("work")).ok();
+        let realm: Option<String> = std::env::var(vars.get("realm").expect("work")).ok();
+        let username: Option<String> = std::env::var(vars.get("username").expect("work")).ok();
+        let password: Option<String> = std::env::var(vars.get("password").expect("work")).ok();
+
+        let scopes = std::env::var("scopes").ok();
+        let scopes = match scopes {
+            Some(scopes_string) => {
+                let parts = scopes_string
+                    .split(",")
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
+                parts
+            }
+            None => Vec::new(),
+        };
+
+        ClientConfiguration {
+            client_id,
+            client_secret,
+            auth_url,
+            token_url,
+            device_authorization_url,
+            token_cache_path,
+            jwks_url,
+            realm,
+            scopes,
+            username,
+            password,
         }
     }
 }
